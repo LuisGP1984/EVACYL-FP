@@ -1,0 +1,11 @@
+Esta carpeta está reservada para el currículo oficial de Formación
+Profesional (RA y criterios oficiales por título/módulo), de forma
+análoga a datos_curriculares/curriculo_lomloe_cyl.json en EVACYL.
+
+Todavía no se ha construido, porque EVACYL FP no tiene (de momento) un
+asistente de currículo oficial — los RA y criterios se introducen
+siempre a mano desde la pestaña "RA y Criterios" de la aplicación.
+
+Este archivo solo existe para que la carpeta no esté vacía al
+empaquetar con PyInstaller; puede borrarse sin ningún problema si en
+algún momento se añade contenido real aquí.
