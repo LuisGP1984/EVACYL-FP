@@ -179,7 +179,7 @@ def _anadir_hoja_criterios(
     fila_codigo = 2
     fila_peso = 3
     hoja.cell(row=fila_codigo, column=1, value="Criterio")
-    hoja.cell(row=fila_peso, column=1, value="Peso en su RA")
+    hoja.cell(row=fila_peso, column=1, value="Peso relativo en su RA")
     for fila_etiqueta in (fila_codigo, fila_peso):
         celda_et = hoja.cell(row=fila_etiqueta, column=1)
         celda_et.font = FUENTE_NOTA_FINAL

@@ -98,10 +98,10 @@ def _cuerpo_seccion_evaluacion_docx(documento: Document, informe: InformeAlumno)
     documento.add_paragraph()
     documento.add_heading("Detalle por criterio de evaluación", level=1)
     filas = [
-        [fila.codigo_criterio, f"{fila.peso_en_ra:g}%", _formatear_numero(fila.valor), fila.calificacion or "—"]
+        [fila.codigo_criterio, f"{fila.peso_en_ra:g}", _formatear_numero(fila.valor), fila.calificacion or "—"]
         for fila in informe.filas_criterios
     ]
-    _anadir_tabla(documento, ["Criterio", "Peso en su RA", "Nota", "Calificación"], filas)
+    _anadir_tabla(documento, ["Criterio", "Peso relativo en su RA", "Nota", "Calificación"], filas)
 
     documento.add_paragraph()
     documento.add_heading("Desglose por instrumento de evaluación", level=1)

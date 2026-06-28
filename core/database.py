@@ -454,25 +454,27 @@ class BaseDatosModulo:
 
     def generar_criterios_para_ra(self, ra_id: int, cantidad: int):
         """Genera automáticamente "cantidad" criterios para un RA, con
-        letras correlativas (a, b, c...) y peso igual entre ellos (de
-        forma que sumen 100% del RA). Si el RA ya tenía criterios, se
-        eliminan primero (esta función está pensada para usarse al
-        configurar el RA por primera vez, no para añadir criterios
-        sueltos después — para eso está agregar_criterio_manual).
+        letras correlativas (a, b, c...) y peso relativo igual entre
+        ellos (1 cada uno: todos valen lo mismo dentro del RA, sin
+        necesidad de que la suma "cuadre" a 100 exacto — el peso es un
+        valor relativo, igual que en EVACYL, no un porcentaje fijo).
+        Si el RA ya tenía criterios, se eliminan primero (esta función
+        está pensada para usarse al configurar el RA por primera vez,
+        no para añadir criterios sueltos después — para eso está
+        agregar_criterio_manual).
         """
         if cantidad < 1:
             raise ValueError("Un RA debe tener al menos un criterio.")
         self.conexion.execute("DELETE FROM criterio WHERE ra_id = ?;", (ra_id,))
-        peso_igual = round(100.0 / cantidad, 4)
         for indice in range(cantidad):
             letra = chr(ord("a") + indice)
             self.conexion.execute(
                 "INSERT INTO criterio (ra_id, letra, peso, orden) VALUES (?, ?, ?, ?);",
-                (ra_id, letra, peso_igual, indice + 1),
+                (ra_id, letra, 1.0, indice + 1),
             )
         self.conexion.commit()
 
-    def agregar_criterio_manual(self, ra_id: int, letra: str, peso: float = 0.0) -> Criterio:
+    def agregar_criterio_manual(self, ra_id: int, letra: str, peso: float = 1.0) -> Criterio:
         letra = letra.strip().lower()
         if not letra or not letra.isalpha():
             raise ValueError("La letra del criterio debe ser una letra (a, b, c...).")
@@ -1226,3 +1228,104 @@ class BaseDatosModulo:
 
     def restaurar_eliminacion(self, captura: dict):
         self._restaurar_subarbol(captura)
+
+    # -- copiar estructura de un módulo a otro (misma BD u otro curso) ------
+    #
+    # Pensado para cuando un docente imparte el mismo módulo en varios
+    # grupos, o repite estructura curso tras curso: en vez de montar RA,
+    # criterios e instrumentos desde cero cada vez, copia la estructura ya
+    # hecha de un módulo existente a un módulo nuevo (vacío de alumnado y
+    # notas). base_datos_origen y self pueden ser la misma instancia
+    # (copiar dentro del mismo curso.db) o instancias distintas abiertas
+    # sobre dos archivos .db diferentes (copiar entre cursos académicos
+    # distintos). Siempre se copian TODOS los RA del módulo origen.
+
+    def copiar_ra_y_criterios_desde(
+        self, base_datos_origen: "BaseDatosModulo", modulo_origen_id: int, modulo_destino_id: int
+    ) -> dict[int, int]:
+        """Copia todos los RA (número, descripción, peso) y sus
+        criterios (letra + peso) del módulo origen al módulo destino,
+        sin tocar alumnado ni notas. Devuelve {criterio_id_origen:
+        criterio_id_destino}, útil para copiar_instrumentos_desde si se
+        llama justo después.
+        """
+        mapa_criterios: dict[int, int] = {}
+        for ra_origen in base_datos_origen.listar_ra(modulo_origen_id):
+            ra_destino = self.agregar_ra(
+                modulo_destino_id, ra_origen.numero, ra_origen.descripcion, ra_origen.peso
+            )
+            for criterio_origen in base_datos_origen.listar_criterios_de_ra(ra_origen.id):
+                criterio_destino = self.agregar_criterio_manual(
+                    ra_destino.id, criterio_origen.letra, criterio_origen.peso
+                )
+                mapa_criterios[criterio_origen.id] = criterio_destino.id
+        return mapa_criterios
+
+    def copiar_instrumentos_desde(
+        self,
+        base_datos_origen: "BaseDatosModulo",
+        modulo_origen_id: int,
+        modulo_destino_id: int,
+        mapa_criterios: dict[int, int],
+    ):
+        """Copia los instrumentos de evaluación de cada evaluación
+        parcial del módulo origen al módulo destino: su nombre, tipo,
+        peso y nota máxima; sus pruebas con su peso; y qué criterios
+        marca cada uno, con el peso de esa relación. No copia ninguna
+        nota de alumnado.
+
+        Requiere que ambos módulos tengan el MISMO número de
+        evaluaciones parciales (se emparejan por su posición: la 1ª
+        evaluación del origen con la 1ª del destino, etc.) — comprobar
+        esto antes de llamar con puede_copiar_instrumentos().
+
+        mapa_criterios debe ser el devuelto por
+        copiar_ra_y_criterios_desde, para traducir los ids de criterio
+        de origen a los del destino (son distintos aunque la letra y el
+        RA sean los mismos).
+        """
+        evaluaciones_origen = base_datos_origen.listar_evaluaciones_parciales(modulo_origen_id)
+        evaluaciones_destino = self.listar_evaluaciones_parciales(modulo_destino_id)
+        evaluaciones_destino_por_orden = {ev.orden: ev for ev in evaluaciones_destino}
+
+        for evaluacion_origen in evaluaciones_origen:
+            evaluacion_destino = evaluaciones_destino_por_orden.get(evaluacion_origen.orden)
+            if evaluacion_destino is None:
+                continue  # no debería ocurrir si se comprobó puede_copiar_instrumentos() antes
+
+            for instrumento_origen in base_datos_origen.listar_instrumentos(evaluacion_origen.id):
+                instrumento_destino = self.crear_instrumento(
+                    evaluacion_destino.id,
+                    instrumento_origen.nombre,
+                    instrumento_origen.tipo,
+                    instrumento_origen.nota_maxima,
+                )
+                self.actualizar_instrumento(
+                    instrumento_destino.id,
+                    instrumento_origen.nombre,
+                    instrumento_origen.peso,
+                    instrumento_origen.nota_maxima,
+                )
+
+                for prueba_origen in base_datos_origen.listar_pruebas(instrumento_origen.id):
+                    prueba_destino = self.agregar_prueba(instrumento_destino.id, prueba_origen.nombre)
+                    self.actualizar_prueba(prueba_destino.id, prueba_origen.nombre, prueba_origen.peso)
+
+                for relacion_origen in base_datos_origen.listar_criterios_de_instrumento(instrumento_origen.id):
+                    criterio_destino_id = mapa_criterios.get(relacion_origen.criterio_id)
+                    if criterio_destino_id is None:
+                        continue
+                    self.marcar_criterio_en_instrumento(
+                        instrumento_destino.id, criterio_destino_id, peso=relacion_origen.peso
+                    )
+
+    def puede_copiar_instrumentos(
+        self, base_datos_origen: "BaseDatosModulo", modulo_origen_id: int, modulo_destino_id: int
+    ) -> bool:
+        """True si el módulo origen y el módulo destino tienen el mismo
+        número de evaluaciones parciales (condición necesaria para que
+        copiar_instrumentos_desde pueda emparejarlas por posición).
+        """
+        n_origen = len(base_datos_origen.listar_evaluaciones_parciales(modulo_origen_id))
+        n_destino = len(self.listar_evaluaciones_parciales(modulo_destino_id))
+        return n_origen == n_destino

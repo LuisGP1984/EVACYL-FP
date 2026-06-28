@@ -88,12 +88,12 @@ def _cuerpo_seccion_evaluacion(story: list, informe: InformeAlumno):
 
     story.append(Paragraph("Detalle por criterio de evaluación", ESTILO_SUBTITULO))
     story.append(Spacer(1, 6))
-    filas_tabla = [["Criterio", "Peso en su RA", "Nota", "Calificación"]]
+    filas_tabla = [["Criterio", "Peso relativo en su RA", "Nota", "Calificación"]]
     for fila in informe.filas_criterios:
         filas_tabla.append(
             [
                 fila.codigo_criterio,
-                f"{fila.peso_en_ra:g}%",
+                f"{fila.peso_en_ra:g}",
                 _formatear_numero(fila.valor),
                 fila.calificacion or "—",
             ]
