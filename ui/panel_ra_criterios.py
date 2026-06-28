@@ -176,17 +176,38 @@ class PanelRACriterios(QWidget):
         seccion.layout_contenido.addLayout(fila_generar)
 
         # -- tabla de criterios ya generados --
+        # Tres columnas: el docente edita el PESO RELATIVO (1, 2, 3...,
+        # igual mecánica que en EVACYL), y la app calcula y muestra el
+        # % resultante en una columna de solo lectura — así nunca hay
+        # que perseguir que la suma "cuadre" a 100 exacto: el reparto
+        # siempre es matemáticamente exacto, sin redondeos. Cualquier
+        # suma de pesos relativos es válida por definición, así que no
+        # hace falta ningún aviso de "debe sumar 100%" aquí.
         if criterios:
             tabla = QTableWidget()
-            tabla.setColumnCount(2)
-            tabla.setHorizontalHeaderLabels(["Código", "Peso dentro del RA"])
+            tabla.setColumnCount(3)
+            tabla.setHorizontalHeaderLabels(["Código", "Peso (valor relativo)", "% dentro del RA"])
             tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
             tabla.setColumnWidth(0, 90)
             tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            tabla.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            tabla.setColumnWidth(2, 110)
             tabla.setRowCount(len(criterios))
             tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
-            suma_pesos_criterios = self.base_datos.suma_pesos_criterios_de_ra(ra.id)
+            items_porcentaje: list[QTableWidgetItem] = []
+
+            def _refrescar_porcentajes():
+                """Recalcula y repinta el % de TODOS los criterios de
+                este RA: cambiar el peso relativo de uno afecta al
+                porcentaje resultante de todos los demás, no solo del
+                que se acaba de editar.
+                """
+                suma_actual = self.base_datos.suma_pesos_criterios_de_ra(ra.id)
+                criterios_actuales = self.base_datos.listar_criterios_de_ra(ra.id)
+                for item_pct, criterio_actual in zip(items_porcentaje, criterios_actuales):
+                    porcentaje = (criterio_actual.peso / suma_actual * 100.0) if suma_actual > 0 else 0.0
+                    item_pct.setText(f"{porcentaje:.2f}%".replace(".", ","))
 
             for fila, criterio in enumerate(criterios):
                 codigo = self.base_datos.codigo_criterio(ra, criterio)
@@ -194,28 +215,34 @@ class PanelRACriterios(QWidget):
                 tabla.setItem(fila, 0, item_codigo)
 
                 spin_peso_criterio = QDoubleSpinBox()
-                spin_peso_criterio.setRange(0.0, 100.0)
+                spin_peso_criterio.setRange(0.0, 1000.0)
                 spin_peso_criterio.setDecimals(2)
-                spin_peso_criterio.setSuffix(" %")
                 spin_peso_criterio.setValue(criterio.peso)
-                spin_peso_criterio.valueChanged.connect(
-                    lambda valor, criterio_id=criterio.id: self.base_datos.actualizar_peso_criterio(
-                        criterio_id, valor
-                    )
+                spin_peso_criterio.setToolTip(
+                    "Valor relativo: si todos los criterios valen \"1\", pesan igual entre sí. "
+                    "Un criterio con \"2\" vale el doble que uno con \"1\"."
                 )
+
+                def _guardar_peso_criterio(criterio_id=criterio.id, spin=spin_peso_criterio):
+                    self.base_datos.actualizar_peso_criterio(criterio_id, spin.value())
+                    _refrescar_porcentajes()
+
+                # editingFinished (no valueChanged): se guarda y se
+                # refleja en los porcentajes solo al terminar de editar
+                # esta celda (cambiar de campo o pulsar Intro/flechas),
+                # no con cada pulsación mientras se escribe el número.
+                spin_peso_criterio.editingFinished.connect(_guardar_peso_criterio)
                 tabla.setCellWidget(fila, 1, spin_peso_criterio)
+
+                item_porcentaje = QTableWidgetItem("")
+                item_porcentaje.setFlags(item_porcentaje.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                tabla.setItem(fila, 2, item_porcentaje)
+                items_porcentaje.append(item_porcentaje)
 
             tabla.setMaximumHeight(32 * (len(criterios) + 1) + 10)
             seccion.layout_contenido.addWidget(tabla)
 
-            color_suma_criterios = "#0DAB6C" if abs(suma_pesos_criterios - 100.0) < 0.01 else "#E22B10"
-            etiqueta_suma = QLabel(
-                f"Suma de pesos de estos criterios: "
-                f"<span style='color:{color_suma_criterios}; font-weight:600;'>{suma_pesos_criterios:g}%</span> "
-                f"(debe ser 100%)"
-            )
-            etiqueta_suma.setTextFormat(Qt.TextFormat.RichText)
-            seccion.layout_contenido.addWidget(etiqueta_suma)
+            _refrescar_porcentajes()
 
         return seccion
 

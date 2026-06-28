@@ -220,7 +220,7 @@ class PanelDetalleInstrumento(QWidget):
         for criterio in criterios_del_ra:
             codigo = self.base_datos.codigo_criterio(ra, criterio)
             fila_criterio = QHBoxLayout()
-            check = QCheckBox(f"{codigo}  (peso en RA{ra.numero}: {criterio.peso:g}%)")
+            check = QCheckBox(f"{codigo}  (peso en RA{ra.numero}: {criterio.peso:g})")
             marcado = criterio.id in marcados_iniciales
             check.setChecked(marcado)
             check.stateChanged.connect(
