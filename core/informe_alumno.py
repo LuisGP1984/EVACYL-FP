@@ -194,6 +194,49 @@ def recopilar_informe_evaluacion(
     )
 
 
+@dataclass
+class InformeAlumnoCompleto:
+    """Todo lo necesario para un informe combinado de un alumno: una
+    sección por cada evaluación parcial (las que sea evaluable) más una
+    sección FINAL, todo en el mismo documento.
+    """
+
+    nombre_modulo: str
+    apellidos_alumno: str
+    nombre_alumno: str
+    secciones_evaluaciones: list[InformeAlumno] = field(default_factory=list)  # solo las evaluables
+    seccion_final: InformeAlumnoFinal | None = None
+
+
+def recopilar_informe_completo(
+    base_datos: BaseDatosModulo, modulo: Modulo, alumno_id: int
+) -> InformeAlumnoCompleto | None:
+    """Recopila el informe combinado de un alumno: una sección por cada
+    evaluación parcial en la que sea evaluable, más la sección FINAL.
+    Devuelve None si el alumno no existe en el módulo.
+    """
+    alumnos = base_datos.listar_alumnos(modulo.id)
+    alumno_encontrado = next((a for a in alumnos if a.id == alumno_id), None)
+    if alumno_encontrado is None:
+        return None
+
+    secciones_evaluaciones = []
+    for evaluacion in base_datos.listar_evaluaciones_parciales(modulo.id):
+        informe_evaluacion = recopilar_informe_evaluacion(base_datos, modulo, evaluacion, alumno_id)
+        if informe_evaluacion is not None:  # None si no es evaluable en esa evaluación todavía
+            secciones_evaluaciones.append(informe_evaluacion)
+
+    seccion_final = recopilar_informe_final(base_datos, modulo, alumno_id)
+
+    return InformeAlumnoCompleto(
+        nombre_modulo=modulo.nombre,
+        apellidos_alumno=alumno_encontrado.apellidos,
+        nombre_alumno=alumno_encontrado.nombre,
+        secciones_evaluaciones=secciones_evaluaciones,
+        seccion_final=seccion_final,
+    )
+
+
 def recopilar_informe_final(
     base_datos: BaseDatosModulo, modulo: Modulo, alumno_id: int
 ) -> InformeAlumnoFinal | None:

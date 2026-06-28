@@ -13,7 +13,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
-from core.informe_alumno import InformeAlumno, InformeAlumnoFinal
+from core.informe_alumno import InformeAlumno, InformeAlumnoCompleto, InformeAlumnoFinal
 
 COLOR_CABECERA = RGBColor(0xE2, 0x2B, 0x10)
 COLOR_RESULTADO = RGBColor(0x7A, 0x1B, 0x08)
@@ -87,17 +87,7 @@ def _anadir_nota_final(documento: Document, etiqueta: str, valor: float | None, 
     documento.add_paragraph()
 
 
-def generar_informe_evaluacion_docx(informe: InformeAlumno, ruta_destino: str | Path) -> Path:
-    ruta_destino = Path(ruta_destino)
-    documento = Document()
-
-    _anadir_cabecera_comun(
-        documento, informe.nombre_modulo, informe.nombre_evaluacion, informe.apellidos_alumno, informe.nombre_alumno
-    )
-    _anadir_nota_final(
-        documento, "Nota final de la evaluación", informe.nota_final_numerica, informe.calificacion_final
-    )
-
+def _cuerpo_seccion_evaluacion_docx(documento: Document, informe: InformeAlumno):
     documento.add_heading("Calificación por Resultado de Aprendizaje", level=1)
     filas_ra = [
         [f"RA{fila.numero_ra}", f"{fila.peso_en_modulo:g}%", _formatear_numero(fila.valor), fila.calificacion or "—"]
@@ -133,20 +123,25 @@ def generar_informe_evaluacion_docx(informe: InformeAlumno, ruta_destino: str | 
         _anadir_tabla(documento, ["Criterio", "Peso en este instrumento", "Nota", "Calificación"], filas_bloque)
         documento.add_paragraph()
 
-    documento.save(str(ruta_destino))
-    return ruta_destino
 
-
-def generar_informe_final_docx(informe: InformeAlumnoFinal, ruta_destino: str | Path) -> Path:
+def generar_informe_evaluacion_docx(informe: InformeAlumno, ruta_destino: str | Path) -> Path:
     ruta_destino = Path(ruta_destino)
     documento = Document()
 
     _anadir_cabecera_comun(
-        documento, informe.nombre_modulo, "Evaluación final de curso",
-        informe.apellidos_alumno, informe.nombre_alumno,
+        documento, informe.nombre_modulo, informe.nombre_evaluacion, informe.apellidos_alumno, informe.nombre_alumno
     )
-    _anadir_nota_final(documento, "Nota final de curso", informe.nota_final_numerica, informe.calificacion_final)
+    _anadir_nota_final(
+        documento, "Nota final de la evaluación", informe.nota_final_numerica, informe.calificacion_final
+    )
 
+    _cuerpo_seccion_evaluacion_docx(documento, informe)
+
+    documento.save(str(ruta_destino))
+    return ruta_destino
+
+
+def _cuerpo_seccion_final_docx(documento: Document, informe: InformeAlumnoFinal):
     pesos_texto = "  ·  ".join(f"{nombre}: {peso:g}" for nombre, peso in informe.pesos_evaluaciones.items())
     parrafo_pesos = documento.add_paragraph()
     run_pesos = parrafo_pesos.add_run(f"Pesos aplicados entre evaluaciones — {pesos_texto}")
@@ -178,6 +173,54 @@ def generar_informe_final_docx(informe: InformeAlumnoFinal, ruta_destino: str | 
         "indicados arriba."
     )
     parrafo_nota.runs[0].italic = True
+
+
+def generar_informe_final_docx(informe: InformeAlumnoFinal, ruta_destino: str | Path) -> Path:
+    ruta_destino = Path(ruta_destino)
+    documento = Document()
+
+    _anadir_cabecera_comun(
+        documento, informe.nombre_modulo, "Evaluación final de curso",
+        informe.apellidos_alumno, informe.nombre_alumno,
+    )
+    _anadir_nota_final(documento, "Nota final de curso", informe.nota_final_numerica, informe.calificacion_final)
+
+    _cuerpo_seccion_final_docx(documento, informe)
+
+    documento.save(str(ruta_destino))
+    return ruta_destino
+
+
+def generar_informe_completo_docx(informe: "InformeAlumnoCompleto", ruta_destino: str | Path) -> Path:
+    """Genera un único documento Word con una sección por cada
+    evaluación parcial evaluable, más una sección FINAL al final —
+    todo en el mismo documento, separado por saltos de página.
+    """
+    ruta_destino = Path(ruta_destino)
+    documento = Document()
+
+    _anadir_cabecera_comun(
+        documento, informe.nombre_modulo, "Informe completo del curso",
+        informe.apellidos_alumno, informe.nombre_alumno,
+    )
+
+    for indice, seccion in enumerate(informe.secciones_evaluaciones):
+        if indice > 0:
+            documento.add_page_break()
+        documento.add_heading(f"Evaluación: {seccion.nombre_evaluacion}", level=0)
+        _anadir_nota_final(
+            documento, "Nota final de la evaluación", seccion.nota_final_numerica, seccion.calificacion_final
+        )
+        _cuerpo_seccion_evaluacion_docx(documento, seccion)
+
+    if informe.seccion_final is not None:
+        documento.add_page_break()
+        documento.add_heading("Evaluación FINAL", level=0)
+        _anadir_nota_final(
+            documento, "Nota final de curso",
+            informe.seccion_final.nota_final_numerica, informe.seccion_final.calificacion_final,
+        )
+        _cuerpo_seccion_final_docx(documento, informe.seccion_final)
 
     documento.save(str(ruta_destino))
     return ruta_destino
