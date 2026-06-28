@@ -22,9 +22,13 @@ from PySide6.QtWidgets import (
 )
 
 from core.database import BaseDatosModulo, Evaluacion, Modulo
-from core.informe_alumno import recopilar_informe_evaluacion, recopilar_informe_final
-from core.informe_docx import generar_informe_evaluacion_docx, generar_informe_final_docx
-from core.informe_pdf import generar_informe_evaluacion_pdf, generar_informe_final_pdf
+from core.informe_alumno import recopilar_informe_completo, recopilar_informe_evaluacion, recopilar_informe_final
+from core.informe_docx import (
+    generar_informe_completo_docx,
+    generar_informe_evaluacion_docx,
+    generar_informe_final_docx,
+)
+from core.informe_pdf import generar_informe_completo_pdf, generar_informe_evaluacion_pdf, generar_informe_final_pdf
 
 OPCION_TODOS = "__TODOS__"
 
@@ -164,3 +168,19 @@ def generar_informe_final_individual(
     if formato == "pdf":
         return generar_informe_final_pdf(informe, carpeta_destino / f"{nombre_base}.pdf")
     return generar_informe_final_docx(informe, carpeta_destino / f"{nombre_base}.docx")
+
+
+def generar_informe_completo_individual(
+    base_datos: BaseDatosModulo, modulo: Modulo, alumno_id: int, formato: str, carpeta_destino: Path,
+) -> Path | None:
+    """Genera un único documento con todas las evaluaciones parciales
+    evaluables + FINAL, como secciones del mismo archivo."""
+    informe = recopilar_informe_completo(base_datos, modulo, alumno_id)
+    if informe is None:
+        return None
+    nombre_base = _nombre_archivo_seguro(
+        f"Informe completo - {informe.apellidos_alumno} {informe.nombre_alumno}"
+    )
+    if formato == "pdf":
+        return generar_informe_completo_pdf(informe, carpeta_destino / f"{nombre_base}.pdf")
+    return generar_informe_completo_docx(informe, carpeta_destino / f"{nombre_base}.docx")

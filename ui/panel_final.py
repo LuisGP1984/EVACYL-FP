@@ -36,7 +36,14 @@ from PySide6.QtWidgets import (
 from core.calificacion import calificacion_cualitativa
 from core.database import BaseDatosModulo, Modulo
 from core.exportacion import exportar_final
-from ui.dialogo_informes import DialogoGenerarInformes, generar_informe_final_individual
+from core.salud_modulo import revisar_salud_final
+from ui.dialogo_informes import (
+    DialogoGenerarInformes,
+    generar_informe_completo_individual,
+    generar_informe_final_individual,
+)
+from ui.panel_estadisticas import PanelEstadisticas
+from ui.panel_salud_evaluacion import PanelSaludEvaluacion
 from ui.panel_evaluacion import (
     COLOR_FONDO_IDENTIDAD,
     _aplicar_cabeceras_por_bloque,
@@ -83,14 +90,8 @@ class TablaCalificacionesFinal(QWidget):
         fila_titulo.addWidget(BotonAyuda("Ayuda — Calificaciones FINAL", TEXTO_AYUDA_FINAL_CALIFICACIONES))
         layout.addLayout(fila_titulo)
 
-        self.aviso_pesos_ra = QLabel("")
-        self.aviso_pesos_ra.setWordWrap(True)
-        self.aviso_pesos_ra.setStyleSheet(
-            "background-color: #FBE3D6; color: #7A1B08; border-left: 4px solid #E22B10; "
-            "border-radius: 6px; padding: 10px;"
-        )
-        self.aviso_pesos_ra.setVisible(False)
-        layout.addWidget(self.aviso_pesos_ra)
+        self.panel_salud = PanelSaludEvaluacion()
+        layout.addWidget(self.panel_salud)
 
         titulo_ra = QLabel("Nota final por Resultado de Aprendizaje")
         titulo_ra.setStyleSheet("font-weight: 600; color: #7A1B08;")
@@ -129,6 +130,11 @@ class TablaCalificacionesFinal(QWidget):
         boton_informe.clicked.connect(self.abrir_dialogo_informes)
         fila_botones.addWidget(boton_informe)
 
+        boton_informe_completo = QPushButton("📚 Generar informe completo del curso…")
+        boton_informe_completo.setObjectName("botonSecundario")
+        boton_informe_completo.clicked.connect(self.abrir_dialogo_informe_completo)
+        fila_botones.addWidget(boton_informe_completo)
+
         fila_botones.addStretch()
         layout.addLayout(fila_botones)
 
@@ -166,6 +172,23 @@ class TablaCalificacionesFinal(QWidget):
         dialogo = DialogoGenerarInformes("Generar informe — FINAL", lista_alumnos, generar_uno, self)
         dialogo.exec()
 
+    def abrir_dialogo_informe_completo(self):
+        alumnos = self.base_datos.listar_alumnos(self.modulo.id)
+        lista_alumnos = [(a.id, f"{a.apellidos}, {a.nombre}".strip(", ")) for a in alumnos]
+        if not lista_alumnos:
+            QMessageBox.information(self, "Sin alumnado", "Este módulo todavía no tiene alumnado.")
+            return
+
+        def generar_uno(alumno_id, formato, carpeta_destino):
+            return generar_informe_completo_individual(
+                self.base_datos, self.modulo, alumno_id, formato, carpeta_destino
+            )
+
+        dialogo = DialogoGenerarInformes(
+            "Generar informe completo del curso", lista_alumnos, generar_uno, self
+        )
+        dialogo.exec()
+
     @staticmethod
     def _ajustar_columnas_identidad(tabla: QTableWidget):
         cabecera = tabla.horizontalHeader()
@@ -179,16 +202,8 @@ class TablaCalificacionesFinal(QWidget):
         tabla.setColumnWidth(1, ancho_nombre)
 
     def refrescar(self):
-        suma_pesos_ra = self.base_datos.suma_pesos_ra(self.modulo.id)
-        if abs(suma_pesos_ra - 100.0) >= 0.01:
-            self.aviso_pesos_ra.setText(
-                f"⚠️ Los pesos de los RA suman {suma_pesos_ra:g}% (deberían sumar 100%), así "
-                "que la NOTA FINAL DE CURSO no se puede calcular todavía. Ve a la pestaña "
-                "«🎯 RA y Criterios» y ajusta el peso de cada RA para que sumen 100% entre todos."
-            )
-            self.aviso_pesos_ra.setVisible(True)
-        else:
-            self.aviso_pesos_ra.setVisible(False)
+        incidencias = revisar_salud_final(self.base_datos, self.modulo)
+        self.panel_salud.actualizar(incidencias)
 
         alumnos = self.base_datos.listar_alumnos(self.modulo.id)
         notas_modulo = self.base_datos.calcular_notas_modulo_final(self.modulo.id)
@@ -338,11 +353,25 @@ class PanelFinal(QWidget):
         self.panel_evaluaciones = PanelEvaluacionesFinal(base_datos, modulo)
         self.sub_pestanas.addTab(self.panel_evaluaciones, "⚖️ Evaluaciones")
 
+        self.panel_estadisticas = PanelEstadisticas(
+            "📈 Estadísticas — Evaluación Final",
+            obtener_ras=lambda: self.base_datos.listar_ra(self.modulo.id),
+            obtener_notas_ra=lambda: self.base_datos.calcular_notas_ra_final(self.modulo.id),
+            obtener_lista_alumnos=self._lista_alumnos,
+        )
+        self.sub_pestanas.addTab(self.panel_estadisticas, "📈 Estadísticas")
+
         self.sub_pestanas.currentChanged.connect(self._al_cambiar_sub_pestana)
+
+    def _lista_alumnos(self):
+        alumnos = self.base_datos.listar_alumnos(self.modulo.id)
+        return [(a.id, f"{a.apellidos}, {a.nombre}".strip(", ")) for a in alumnos]
 
     def _al_cambiar_sub_pestana(self, _indice: int):
         self.tabla_calificaciones.refrescar()
+        self.panel_estadisticas.refrescar()
 
     def refrescar(self):
         self.tabla_calificaciones.refrescar()
         self.panel_evaluaciones.refrescar()
+        self.panel_estadisticas.refrescar()

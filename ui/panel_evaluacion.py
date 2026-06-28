@@ -38,9 +38,12 @@ from PySide6.QtWidgets import (
 from core.calificacion import calificacion_cualitativa, color_hex_nota
 from core.database import BaseDatosModulo, Evaluacion, Modulo
 from core.exportacion import exportar_evaluacion
+from core.salud_modulo import revisar_salud_evaluacion
 from ui.dialogo_informes import DialogoGenerarInformes, generar_informe_evaluacion_individual
 from ui.estilos import COLOR_COLUMNA_IDENTIDAD
+from ui.panel_estadisticas import PanelEstadisticas
 from ui.panel_instrumentos import PanelInstrumentos
+from ui.panel_salud_evaluacion import PanelSaludEvaluacion
 from ui.widgets_comunes import BotonAyuda
 from ui.widgets_comunes import aplicar_cabeceras_por_bloque as _aplicar_cabeceras_por_bloque
 
@@ -103,23 +106,8 @@ class TablaCalificaciones(QWidget):
         fila_titulo.addWidget(BotonAyuda("Ayuda — Calificaciones", TEXTO_AYUDA_CALIFICACIONES))
         layout.addLayout(fila_titulo)
 
-        self.aviso_sin_instrumentos = QLabel("")
-        self.aviso_sin_instrumentos.setWordWrap(True)
-        self.aviso_sin_instrumentos.setStyleSheet(
-            "background-color: #FBE3D6; color: #7A1B08; border-left: 4px solid #E22B10; "
-            "border-radius: 6px; padding: 10px;"
-        )
-        self.aviso_sin_instrumentos.setVisible(False)
-        layout.addWidget(self.aviso_sin_instrumentos)
-
-        self.aviso_pesos_ra = QLabel("")
-        self.aviso_pesos_ra.setWordWrap(True)
-        self.aviso_pesos_ra.setStyleSheet(
-            "background-color: #FBE3D6; color: #7A1B08; border-left: 4px solid #E22B10; "
-            "border-radius: 6px; padding: 10px;"
-        )
-        self.aviso_pesos_ra.setVisible(False)
-        layout.addWidget(self.aviso_pesos_ra)
+        self.panel_salud = PanelSaludEvaluacion()
+        layout.addWidget(self.panel_salud)
 
         titulo_ra = QLabel("Nota por Resultado de Aprendizaje")
         titulo_ra.setStyleSheet("font-weight: 600; color: #7A1B08;")
@@ -222,29 +210,8 @@ class TablaCalificaciones(QWidget):
         tabla.setColumnWidth(1, ancho_nombre)
 
     def refrescar(self):
-        instrumentos = self.base_datos.listar_instrumentos(self.evaluacion.id)
-        if not instrumentos:
-            self.aviso_sin_instrumentos.setText(
-                "⚠️ Todavía no has creado ningún Instrumento de Evaluación (IE) en esta "
-                "evaluación, así que no hay notas que mostrar. Ve a la pestaña «📝 "
-                "Instrumentos de Evaluación» para crear el primero."
-            )
-            self.aviso_sin_instrumentos.setVisible(True)
-        else:
-            self.aviso_sin_instrumentos.setVisible(False)
-
-        suma_pesos_ra = self.base_datos.suma_pesos_ra(self.modulo.id)
-        if abs(suma_pesos_ra - 100.0) >= 0.01:
-            self.aviso_pesos_ra.setText(
-                f"⚠️ Los pesos de los RA suman {suma_pesos_ra:g}% (deberían sumar 100%), así "
-                "que la NOTA FINAL del módulo no se puede calcular todavía. Ve a la pestaña "
-                "«🎯 RA y Criterios» y ajusta el peso de cada RA para que sumen 100% entre todos. "
-                "(Las notas de cada RA por separado sí se calculan correctamente; solo falta "
-                "la combinación final.)"
-            )
-            self.aviso_pesos_ra.setVisible(True)
-        else:
-            self.aviso_pesos_ra.setVisible(False)
+        incidencias = revisar_salud_evaluacion(self.base_datos, self.modulo, self.evaluacion)
+        self.panel_salud.actualizar(incidencias)
 
         vista_alumnos = self.base_datos.listar_alumnos_para_evaluacion(
             self.modulo.id, self.evaluacion.orden
@@ -421,11 +388,31 @@ class PanelEvaluacion(QWidget):
         self.panel_instrumentos = PanelInstrumentos(base_datos, modulo, evaluacion)
         self.sub_pestanas.addTab(self.panel_instrumentos, "📝 Instrumentos de Evaluación")
 
+        self.panel_estadisticas = PanelEstadisticas(
+            "📈 Estadísticas",
+            obtener_ras=lambda: self.base_datos.listar_ra(self.modulo.id),
+            obtener_notas_ra=lambda: self.base_datos.calcular_notas_ra_evaluacion(
+                self.evaluacion.id, self.modulo.id
+            ),
+            obtener_lista_alumnos=self._lista_alumnos_evaluables,
+        )
+        self.sub_pestanas.addTab(self.panel_estadisticas, "📈 Estadísticas")
+
         self.sub_pestanas.currentChanged.connect(self._al_cambiar_sub_pestana)
+
+    def _lista_alumnos_evaluables(self):
+        vista = self.base_datos.listar_alumnos_para_evaluacion(self.modulo.id, self.evaluacion.orden)
+        return [
+            (alumno.id, f"{alumno.apellidos}, {alumno.nombre}".strip(", "))
+            for alumno, evaluable in vista
+            if evaluable
+        ]
 
     def _al_cambiar_sub_pestana(self, _indice: int):
         self.tabla_calificaciones.refrescar()
+        self.panel_estadisticas.refrescar()
 
     def refrescar(self):
         self.tabla_calificaciones.refrescar()
         self.panel_instrumentos.refrescar_todo()
+        self.panel_estadisticas.refrescar()
