@@ -1246,7 +1246,26 @@ class BaseDatosModulo:
         return captura
 
     def restaurar_eliminacion(self, captura: dict):
+        """Deshace una eliminación previamente capturada. No comprueba
+        si algo ha cambiado desde entonces; simplemente reinserta lo
+        capturado.
+
+        Si lo restaurado es un criterio, además hay que recalcular el
+        peso de TODOS los criterios en cada instrumento donde el
+        restaurado vuelve a estar marcado: al eliminarlo, esos
+        instrumentos ya se recalcularon SIN él, y si solo se reinserta
+        la fila capturada sin volver a recalcular, el criterio
+        restaurado queda con su peso antiguo y los demás se quedan con
+        el peso de cuando él no estaba — la suma deja de ser 100%.
+        """
         self._restaurar_subarbol(captura)
+
+        if captura["tabla_principal"] == "criterio":
+            for tabla_dep, filas_dep in captura["dependientes"]:
+                if tabla_dep == "instrumento_criterio":
+                    instrumentos_afectados = {fila["instrumento_id"] for fila in filas_dep}
+                    for instrumento_id in instrumentos_afectados:
+                        self.recalcular_pesos_criterios_de_instrumento(instrumento_id)
 
     # -- copiar estructura de un módulo a otro (misma BD u otro curso) ------
     #
