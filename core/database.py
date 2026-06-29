@@ -490,8 +490,27 @@ class BaseDatosModulo:
         return Criterio(id=cur.lastrowid, ra_id=ra_id, letra=letra, peso=peso, orden=siguiente_orden)
 
     def actualizar_peso_criterio(self, criterio_id: int, peso: float):
+        cur = self.conexion.execute("SELECT peso FROM criterio WHERE id = ?;", (criterio_id,))
+        fila = cur.fetchone()
+        peso_anterior = fila[0] if fila else None
+
         self.conexion.execute("UPDATE criterio SET peso = ? WHERE id = ?;", (peso, criterio_id))
         self.conexion.commit()
+
+        # Si el peso ha cambiado, hay que recalcular el peso de este
+        # criterio en TODOS los instrumentos donde ya estuviera marcado:
+        # ese peso se calcula a partir del peso del criterio en su RA,
+        # así que si este cambia, el recalculado de cada instrumento
+        # queda desactualizado hasta que se vuelva a marcar/desmarcar
+        # algo en ese instrumento — forzar el recálculo aquí evita ese
+        # desajuste silencioso (visible, por ejemplo, en Trazabilidad).
+        if peso_anterior is not None and peso_anterior != peso:
+            cur = self.conexion.execute(
+                "SELECT DISTINCT instrumento_id FROM instrumento_criterio WHERE criterio_id = ?;",
+                (criterio_id,),
+            )
+            for (instrumento_id,) in cur.fetchall():
+                self.recalcular_pesos_criterios_de_instrumento(instrumento_id)
 
     def eliminar_criterio(self, criterio_id: int):
         # Antes de borrar, identificamos qué instrumentos tenían este
@@ -1329,3 +1348,58 @@ class BaseDatosModulo:
         n_origen = len(base_datos_origen.listar_evaluaciones_parciales(modulo_origen_id))
         n_destino = len(self.listar_evaluaciones_parciales(modulo_destino_id))
         return n_origen == n_destino
+
+    # -- trazabilidad: qué instrumento/evaluación evalúa cada criterio ------
+
+    def trazabilidad_criterios_instrumentos(
+        self, evaluacion_id: int, modulo_id: int
+    ) -> tuple[list[tuple[ResultadoAprendizaje, Criterio]], list[InstrumentoEvaluacion], dict[tuple[int, int], float | None]]:
+        """Para una evaluación parcial: devuelve (criterios_con_ra,
+        instrumentos, pesos), donde pesos[(criterio_id, instrumento_id)]
+        es el peso de ese instrumento para ese criterio (ya calculado
+        automáticamente a partir del peso del criterio en su RA), o
+        None si ese instrumento no evalúa ese criterio. Reutilizado
+        tanto por la exportación a Excel como por la pestaña de
+        Trazabilidad en pantalla.
+        """
+        criterios_con_ra = self.listar_criterios_de_modulo(modulo_id)
+        instrumentos = self.listar_instrumentos(evaluacion_id)
+        pesos_por_instrumento = {
+            instrumento.id: {
+                ic.criterio_id: ic.peso for ic in self.listar_criterios_de_instrumento(instrumento.id)
+            }
+            for instrumento in instrumentos
+        }
+        pesos: dict[tuple[int, int], float | None] = {}
+        for _ra, criterio in criterios_con_ra:
+            for instrumento in instrumentos:
+                pesos[(criterio.id, instrumento.id)] = pesos_por_instrumento.get(instrumento.id, {}).get(
+                    criterio.id
+                )
+        return criterios_con_ra, instrumentos, pesos
+
+    def trazabilidad_criterios_evaluaciones(
+        self, modulo_id: int
+    ) -> tuple[list[tuple[ResultadoAprendizaje, Criterio]], list[Evaluacion], dict[tuple[int, int], bool]]:
+        """Para FINAL: devuelve (criterios_con_ra, evaluaciones_parciales,
+        evaluado), donde evaluado[(criterio_id, evaluacion_id)] indica
+        si ese criterio tuvo alguna nota calculada en esa evaluación
+        parcial (para algún alumno).
+        """
+        criterios_con_ra = self.listar_criterios_de_modulo(modulo_id)
+        evaluaciones = self.listar_evaluaciones_parciales(modulo_id)
+
+        criterios_evaluados_por_evaluacion: dict[int, set[int]] = {}
+        for evaluacion in evaluaciones:
+            notas = self.calcular_notas_criterios_evaluacion(evaluacion.id, modulo_id)
+            criterios_evaluados_por_evaluacion[evaluacion.id] = {
+                criterio_id for (criterio_id, _alumno_id), valor in notas.items() if valor is not None
+            }
+
+        evaluado: dict[tuple[int, int], bool] = {}
+        for _ra, criterio in criterios_con_ra:
+            for evaluacion in evaluaciones:
+                evaluado[(criterio.id, evaluacion.id)] = (
+                    criterio.id in criterios_evaluados_por_evaluacion[evaluacion.id]
+                )
+        return criterios_con_ra, evaluaciones, evaluado
